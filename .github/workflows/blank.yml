@@ -208,10 +208,5 @@ jobs:
           pull-request-number: ${{ github.event.pull_request.number }}
           comment: |
             ✅ **İşlem Tamamlandı!**
-            
-            Tüm `_pkgs.txt` dosyaları başarıyla işlendi ve üretilen Depot dosyaları `collected` klasörüne otomatik olarak eklendi/güncellendi.
-            
-            **Not:** İşlem sırasında **keys** dosyası bulunamayan `_pkgs.txt` dosyaları atlandı, ancak bu bir hataya yol açmadı.
-            
-            Teşekkürler! 🤖
-          delete-branch: false # PR kapatılsa bile branch'i silme (daha güvenli bir varsayılan)
+
+          delete-branch: true
