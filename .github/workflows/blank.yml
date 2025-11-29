@@ -19,19 +19,13 @@ jobs:
     # if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
-- name: Checkout repository
-  uses: actions/checkout@v4
-  with:
-    token: ${{ secrets.ACTIONS_PAT }} # PAT secret'ı kullan
-    fetch-depth: 0
-...
-# --- 5) Sonuçları Commit ve Push Et ---
-- name: Commit and Push Results
-  shell: bash
-  run: |
-    ...
-    # Push yaparken PAT'i kullan
-    git push https://x-access-token:${{ secrets.ACTIONS_PAT }}@github.com/${{ github.repository }} HEAD:${{ github.head_ref || github.ref_name }}
+      # --- 1) Repo'yu checkout et ---
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Bu token ile sonraki adımlarda commit ve push yapılabilir
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0 # Tüm geçmişi getir (Gerekebilir)
 
       # --- 2) PR Dosyalarını İndir (Sadece PR ile tetiklenirse) ---
       - name: Fetch PR Files (Changes Only)
