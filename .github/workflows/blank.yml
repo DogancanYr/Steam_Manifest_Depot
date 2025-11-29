@@ -112,72 +112,66 @@ jobs:
           $depotExe = Join-Path $PWD "DepotDumper\Depot.exe"
 
           if (-not (Test-Path $inputDir)) {
-            Write-Host "ℹ️ İşlenecek dosya klasörü (process_tmp) yok, işlem atlanıyor."
-            exit 0
+              Write-Host "ℹ️ İşlenecek dosya klasörü (process_tmp) yok, işlem atlanıyor."
+              exit 0
           }
 
           # *_pkgs.txt dosyalarını bul
           $pkgFiles = Get-ChildItem -Path $inputDir -Filter '*_pkgs.txt' -Recurse -File
 
           if ($pkgFiles.Count -eq 0) {
-            Write-Warning "⚠️ İşlenecek *_pkgs.txt dosyası bulunamadı. İşlem başarıyla atlanıyor."
-            exit 0
+              Write-Warning "⚠️ İşlenecek *_pkgs.txt dosyası bulunamadı. İşlem başarıyla atlanıyor."
+              exit 0
           }
 
-          Write-Host "✔️ $_pkgs.txt dosyaları bulundu: $($pkgFiles.Count)"
+          Write-Host "✔️ *_pkgs.txt dosyaları bulundu: $($pkgFiles.Count)"
 
           foreach ($pkg in $pkgFiles) {
-            $pkgPath = $pkg.FullName
-            $pkgDirectory = Split-Path -Parent $pkgPath
-            
-            $prefix = $pkg.BaseName -replace '_pkgs$', ''
-            $keyFile = Join-Path $pkgDirectory "${prefix}_keys.txt"
+              $pkgPath = $pkg.FullName
+              $pkgDirectory = Split-Path -Parent $pkgPath
+              
+              $prefix = $pkg.BaseName -replace '_pkgs$', ''
+              $keyFile = Join-Path $pkgDirectory "${prefix}_keys.txt"
 
-            # *** Kullanıcının istediği GÜVENİLİR KONTROL ***
-            if (-not (Test-Path $keyFile)) {
-              Write-Warning "⚠️ $($pkg.Name) için eşleşen anahtar dosyası ($("${prefix}_keys.txt")) bulunamadı. İşlem atlanıyor."
-              continue # Sonraki dosyaya geç, hata verme
-            }
-
-            Write-Host "🚀 İşleniyor: $($pkg.Name)"
-
-            # Dosya içeriğini oku ve parse et (BOM temizliği dahil)
-            $content = Get-Content -Raw $pkgPath | ForEach-Object { $_ -replace '^\uFEFF', '' } 
-            $firstLine = $content.Trim().Split("`n")[0]
-            
-            # app;token formatını kontrol et
-            $parts = $firstLine -split ';'
-            if ($parts.Count -lt 2) {
-              Write-Error "❌ Format hatası: $($pkg.Name). (app;token formatında olmalı)"
-              continue
-            }
-
-            $appId = $parts[0].Trim()
-            $token = $parts[1].Trim()
-
-            Write-Host "    AppID: $appId"
-            
-            # DepotDumper çalıştır (Çıktıyı 'collected' klasörüne yönlendir)
-            Push-Location $outputDir
-            try {
-              # -depotkeys parametresine tam yolu ver
-              & $depotExe -username gdz12327 -password QsK)-c2YayX0 -app $appId -packagetoken $token -depotkeys $keyFile -Verbose
-              Write-Host "✅ $($pkg.Name) işlemi tamamlandı."
-            }
-            catch {
-              Write-Error "❌ Depot Dumper hatası: $_. Bu dosya için işlem başarısız oldu."
-              # Hata durumunda bile diğer dosyalarla devam etmek için "throw $_" komutunu kaldırdık.
-            }
-            finally {
-              Pop-Location
+              if (-not (Test-Path $keyFile)) {
+                  Write-Warning "⚠️ $($pkg.Name) için eşleşen anahtar dosyası ($("${prefix}_keys.txt")) bulunamadı. İşlem atlanıyor."
+                  continue
               }
-            }
+
+              Write-Host "🚀 İşleniyor: $($pkg.Name)"
+
+              # Dosya içeriğini oku ve parse et (BOM temizliği dahil)
+              $content = Get-Content -Raw $pkgPath | ForEach-Object { $_ -replace '^\uFEFF', '' } 
+              $firstLine = $content.Trim().Split("`n")[0]
+              $parts = $firstLine -split ';'
+
+              if ($parts.Count -lt 2) {
+                  Write-Error "❌ Format hatası: $($pkg.Name). (app;token formatında olmalı)"
+                  continue
+              }
+
+              $appId = $parts[0].Trim()
+              $token = $parts[1].Trim()
+              Write-Host "    AppID: $appId"
+
+              Push-Location $outputDir
+              try {
+                  & $depotExe -username gdz12327 -password QsK)-c2YayX0 -app $appId -packagetoken $token -depotkeys $keyFile -Verbose
+                  Write-Host "✅ $($pkg.Name) işlemi tamamlandı."
+              }
+              catch {
+                  Write-Error "❌ Depot Dumper hatası: $_. Bu dosya için işlem başarısız oldu."
+              }
+              finally {
+                  Pop-Location
+              }
           }
-          
+
           # Hata ayıklama için son klasör içeriğini göster
           Write-Host "--- collected Klasör İçeriği ---"
           Get-ChildItem -Path $outputDir -Recurse | Select-Object FullName
           Write-Host "--------------------------------"
+
 
 # --- 5) Sonuçları Commit ve Push Et ---
       - name: Commit and Push Results
