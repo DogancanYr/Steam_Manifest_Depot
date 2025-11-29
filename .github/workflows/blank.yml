@@ -161,7 +161,7 @@ jobs:
             Push-Location $outputDir
             try {
               # -depotkeys parametresine tam yolu ver
-              & $depotExe -username $env:DEPOT_USERNAME -password $env:DEPOT_PASSWORD -app $appId -packagetoken $token -depotkeys $keyFile -Verbose
+              & $depotExe $env:DEPOT_USERNAME -username $env:DEPOT_PASSWORD -password -app $appId -packagetoken $token -depotkeys $keyFile -Verbose
               Write-Host "✅ $($pkg.Name) işlemi tamamlandı."
             }
             catch {
