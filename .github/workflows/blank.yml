@@ -170,6 +170,7 @@ jobs:
             }
             finally {
               Pop-Location
+              }
             }
           }
           
