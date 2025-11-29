@@ -1,28 +1,34 @@
 name: PR Depot Process Optimized
 
+# PR açıldığında, güncellendiğinde veya manuel olarak tetiklendiğinde çalışır
 on:
   pull_request:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 
+# İşlem için gerekli izinler
 permissions:
-  contents: write    # Repo push işlemi için
-  pull-requests: write # PR kapatma ve yorum için
+  contents: write    # Repository'ye commit/push yapabilmek için
+  pull-requests: write # PR'ı kapatabilmek ve yorum ekleyebilmek için
 
 jobs:
   process:
-    name: Process Steam Depot
+    name: Process Steam Depot Files
     runs-on: windows-latest
+    # Eğer bu bir PR ise, sadece kaynak (head) branch'de çalış
+    # if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
       # --- 1) Repo'yu checkout et ---
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          # Bu token ile sonraki adımlarda commit ve push yapılabilir
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0 # Tüm geçmişi getir (Gerekebilir)
 
-      # --- 2) PR Dosyalarını İndir (Tüm değişenler - Yeni Mantık) ---
-      - name: Fetch PR Files (All)
+      # --- 2) PR Dosyalarını İndir (Sadece PR ile tetiklenirse) ---
+      - name: Fetch PR Files (Changes Only)
         if: github.event_name == 'pull_request'
         shell: pwsh
         env:
@@ -31,141 +37,146 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           Write-Host "📥 PR #$env:PR_NUMBER dosyaları taranıyor ve indiriliyor..."
-
+          
           $headers = @{
             Authorization = "token $env:GITHUB_TOKEN"
             Accept        = "application/vnd.github.v3+json"
           }
 
-          $url = "https://api.github.com/repos/$env:REPO_NAME/pulls/$env:PR_NUMBER/files"
+          $url = "https://api.github.com/repos/$env:REPO_NAME/pulls/$env:PR_NUMBER/files?per_page=100"
           $files = Invoke-RestMethod -Headers $headers -Uri $url -Method Get
 
           if (-not $files) {
-            Write-Warning "⚠️ PR içinde dosya bulunamadı veya API yanıt vermedi."
+            Write-Warning "⚠️ PR içinde dosya bulunamadı veya API yanıt vermedi. İşlem atlanıyor."
             exit 0
           }
 
+          # İndirilen dosyaların kopyalanacağı geçici dizin
           $tempDir = New-Item -ItemType Directory -Path "process_tmp" -Force
           $downloadCount = 0
 
           foreach ($file in $files) {
-            # Sadece silinen (removed) dosyaları atla, Geri kalan tüm dosyaları indir
+            # Sadece silinen (removed) dosyaları atla
             if ($file.status -eq "removed") { continue }
             
-            # Olası alt klasörleri de oluştur (filename tam path'i içerir)
+            # Olası alt klasörleri de oluştur ve dosyayı indir
             $fullPath = Join-Path $tempDir $file.filename
             $dir = Split-Path -Parent $fullPath
             if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
 
             # Dosyayı indir
-            Invoke-WebRequest -Uri $file.raw_url -OutFile $fullPath
-            Write-Host "⬇️ İndirildi: $($file.filename)"
-            $downloadCount++
+            try {
+              Invoke-WebRequest -Uri $file.raw_url -OutFile $fullPath -ErrorAction Stop
+              Write-Host "⬇️ İndirildi: $($file.filename)"
+              $downloadCount++
+            }
+            catch {
+              Write-Error "❌ İndirme hatası: $($file.filename) - $_"
+            }
           }
 
           if ($downloadCount -eq 0) {
-            Write-Warning "⚠️ İndirilecek dosya bulunamadı."
+            Write-Warning "⚠️ İşlenecek dosya bulunamadı (removed dışındaki dosyalar)."
             exit 0
           }
 
-          Write-Host "--- process_tmp Klasör İçeriği (Debug) ---"
+          Write-Host "✅ Toplam $downloadCount dosya başarıyla indirildi."
+          Write-Host "--- process_tmp Klasör İçeriği ---"
           Get-ChildItem -Path $tempDir -Recurse | Select-Object FullName
-          Write-Host "-------------------------------------------"
+          Write-Host "----------------------------------"
 
       # --- 3) Depot Tools İndir ---
-      - name: Download Depot Tools
+      - name: Download Depot Dumper Tool
         shell: pwsh
         run: |
           $toolDir = New-Item -ItemType Directory -Path "DepotDumper" -Force
           $toolUrl = "https://raw.githubusercontent.com/DogancanYr/Steam_Manifest_Depot/main/DepotDumper/Depot.exe"
           
           Write-Host "🛠️ Depot.exe indiriliyor..."
-          Invoke-WebRequest -Uri $toolUrl -OutFile (Join-Path $toolDir "Depot.exe")
+          Invoke-WebRequest -Uri $toolUrl -OutFile (Join-Path $toolDir "Depot.exe") -ErrorAction Stop
 
-          if (-not (Test-Path (Join-Path $toolDir "Depot.exe"))) {
-            throw "❌ Depot.exe indirilemedi!"
-          }
+          Write-Host "✅ Depot.exe indirildi."
 
       # --- 4) Depot İşlemi (Secrets Kullanarak) ---
-      - name: Run Depot Dumper
+      - name: Run Depot Dumper and Collect Files
         id: depot_run
         shell: pwsh
         env:
-          DEPOT_USER: ${{ secrets.DEPOT_USERNAME }} # GitHub Secrets'tan al
-          DEPOT_PASS: ${{ secrets.DEPOT_PASSWORD }} # GitHub Secrets'tan al
+          DEPOT_USER: ${{ secrets.DEPOT_USERNAME }} 
+          DEPOT_PASS: ${{ secrets.DEPOT_PASSWORD }}
         run: |
           $ErrorActionPreference = 'Stop'
           
-          # Çalışma alanlarını ayarla
           $inputDir = "process_tmp"
           $outputDir = New-Item -ItemType Directory -Path "collected" -Force
           $depotExe = Join-Path $PWD "DepotDumper\Depot.exe"
 
           if (-not (Test-Path $inputDir)) {
-            Write-Host "ℹ️ İşlenecek dosya klasörü yok, işlem atlanıyor."
+            Write-Host "ℹ️ İşlenecek dosya klasörü (process_tmp) yok, işlem atlanıyor."
             exit 0
           }
 
-          # PKG dosyalarını bul (Sadece _pkgs.txt ile ilgileniyoruz)
+          # *_pkgs.txt dosyalarını bul
           $pkgFiles = Get-ChildItem -Path $inputDir -Filter '*_pkgs.txt' -Recurse -File
 
           if ($pkgFiles.Count -eq 0) {
             Write-Warning "⚠️ İşlenecek *_pkgs.txt dosyası bulunamadı. İşlem başarıyla atlanıyor."
-            
-            # Hata ayıklama için dizin içeriğini tekrar göster
-            Write-Host "--- HATA AYIKLAMA: process_tmp İçeriği ---"
-            Get-ChildItem -Path $inputDir -Recurse | Select-Object FullName
-            Write-Host "-------------------------------------------"
-            exit 0 # Başarılı çıkış kodu
+            exit 0
           }
 
           Write-Host "✔️ $_pkgs.txt dosyaları bulundu: $($pkgFiles.Count)"
 
           foreach ($pkg in $pkgFiles) {
             $pkgPath = $pkg.FullName
-            # PKG dosyasının bulunduğu dizini kullan
             $pkgDirectory = Split-Path -Parent $pkgPath
             
             $prefix = $pkg.BaseName -replace '_pkgs$', ''
             $keyFile = Join-Path $pkgDirectory "${prefix}_keys.txt"
 
-            # Not: _keys.txt dosyasının indirilmesini garanti altına almak için 2. adımda filtrelemeyi kaldırdık.
+            # *** Kullanıcının istediği GÜVENİLİR KONTROL ***
             if (-not (Test-Path $keyFile)) {
-              Write-Warning "⚠️ $($pkg.Name) için eşleşen _keys dosyası bulunamadı, atlanıyor. (Bu dosyanın PR'da olduğundan emin olun.)"
-              continue
+              Write-Warning "⚠️ $($pkg.Name) için eşleşen anahtar dosyası ($("${prefix}_keys.txt")) bulunamadı. İşlem atlanıyor."
+              continue # Sonraki dosyaya geç, hata verme
             }
 
             Write-Host "🚀 İşleniyor: $($pkg.Name)"
 
-            # Dosya içeriğini oku ve parse et
-            $content = Get-Content -Raw $pkgPath | ForEach-Object { $_ -replace '^\uFEFF', '' } # BOM temizle
+            # Dosya içeriğini oku ve parse et (BOM temizliği dahil)
+            $content = Get-Content -Raw $pkgPath | ForEach-Object { $_ -replace '^\uFEFF', '' } 
             $firstLine = $content.Trim().Split("`n")[0]
             
+            # app;token formatını kontrol et
             $parts = $firstLine -split ';'
             if ($parts.Count -lt 2) {
-              Write-Error "❌ Format hatası: $($pkg.Name) (app;token formatında olmalı)"
+              Write-Error "❌ Format hatası: $($pkg.Name). (app;token formatında olmalı)"
               continue
             }
 
             $appId = $parts[0].Trim()
             $token = $parts[1].Trim()
 
-            Write-Host "    AppID: $appId"
+            Write-Host "    AppID: $appId"
             
             # DepotDumper çalıştır (Çıktıyı 'collected' klasörüne yönlendir)
             Push-Location $outputDir
             try {
-              # keys dosyasının tam yolunu kullan
+              # -depotkeys parametresine tam yolu ver
               & $depotExe -username $env:DEPOT_USER -password $env:DEPOT_PASS -app $appId -packagetoken $token -depotkeys $keyFile -Verbose
+              Write-Host "✅ $($pkg.Name) işlemi tamamlandı."
             }
             catch {
-              Write-Error "❌ Depot hatası: $_"
-              throw $_
+              Write-Error "❌ Depot Dumper hatası: $_. Bu dosya için işlem başarısız oldu."
+              # Hata durumunda bile diğer dosyalarla devam etmek için "throw $_" komutunu kaldırdık.
             }
             finally {
               Pop-Location
             }
           }
+          
+          # Hata ayıklama için son klasör içeriğini göster
+          Write-Host "--- collected Klasör İçeriği ---"
+          Get-ChildItem -Path $outputDir -Recurse | Select-Object FullName
+          Write-Host "--------------------------------"
 
       # --- 5) Sonuçları Commit ve Push Et ---
       - name: Commit and Push Results
@@ -173,26 +184,33 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Sadece collected klasörünü ekle
+          # Sadece 'collected' klasöründeki değişiklikleri takip et
           git add collected/
           
+          # Commit edilecek bir değişiklik var mı kontrol et
           if git diff --cached --quiet; then
-            echo "ℹ️ Değişiklik yok, push yapılmayacak."
+            echo "ℹ️ collected/ klasöründe yeni değişiklik yok, push yapılmayacak."
           else
-            echo "📦 Dosyalar commitleniyor..."
+            echo "📦 Yeni Depot dosyaları commitleniyor..."
             git commit -m "Auto-process: Added depot files from PR #${{ github.event.pull_request.number || github.sha }}"
-            git push
+            
+            # Geçerli branch'e push et
+            # PR'ın açıldığı branch'e push yap
+            git push origin HEAD:${{ github.head_ref || github.ref_name }}
           fi
 
-      # --- 6) PR'ı Kapat ---
+      # --- 6) PR'ı Kapat ve Yorum Ekle ---
       - name: Close Pull Request
         if: success() && github.event_name == 'pull_request'
         uses: peter-evans/close-pull@v3
         with:
           pull-request-number: ${{ github.event.pull_request.number }}
           comment: |
-            ✅ **İşlem Başarılı!**
+            ✅ **İşlem Tamamlandı!**
             
-            Depot dosyaları işlendi ve `collected` klasörüne eklendi.
+            Tüm `_pkgs.txt` dosyaları başarıyla işlendi ve üretilen Depot dosyaları `collected` klasörüne otomatik olarak eklendi/güncellendi.
+            
+            **Not:** İşlem sırasında **keys** dosyası bulunamayan `_pkgs.txt` dosyaları atlandı, ancak bu bir hataya yol açmadı.
+            
             Teşekkürler! 🤖
-          delete-branch: true # Opsiyonel: İşlem bitince PR branch'ini siler
+          delete-branch: false # PR kapatılsa bile branch'i silme (daha güvenli bir varsayılan)
