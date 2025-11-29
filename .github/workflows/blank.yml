@@ -198,6 +198,7 @@ jobs:
             
             # Geçerli branch'e push et
             git push origin HEAD:${{ github.head_ref || github.ref_name }}
+          fi
 
       # --- 6) PR'ı Kapat ve Yorum Ekle ---
       - name: Close Pull Request
