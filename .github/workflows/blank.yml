@@ -24,7 +24,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           # Bu token ile sonraki adımlarda commit ve push yapılabilir
-          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          token: ${{ github.token }}
           fetch-depth: 0 # Tüm geçmişi getir (Gerekebilir)
 
       # --- 2) PR Dosyalarını İndir (Sadece PR ile tetiklenirse) ---
