@@ -177,8 +177,8 @@ jobs:
       - name: Commit and Push Results
         shell: bash # Sadece bu adım için kabuğu Bash olarak ayarla
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "DogancanYr"
+          git config user.email "DogancanYr@users.noreply.github.com"
 
           # Sadece 'collected' klasöründeki değişiklikleri takip et
           git add collected/
